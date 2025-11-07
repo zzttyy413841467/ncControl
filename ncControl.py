@@ -66,7 +66,7 @@ class NetcupTrafficThrottleTester:
             logger.error(f"配置文件 {self.config_file} 不存在，请创建配置文件")
             return {}
         except json.JSONDecodeError as e:
-            logger.error(f"配置文件JSON格式错误: {e}")
+            logger.error(f"配置文件JSON格式错误11: {e}")
             return {}
         except Exception as e:
             logger.error(f"加载配置文件时发生错误: {e}")
