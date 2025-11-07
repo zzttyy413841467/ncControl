@@ -1,0 +1,18 @@
+{
+  "webhook_path": "/webhook/secret-0c68fb14-bb0d-41ca-a53f-a8ba0ea08fae",
+  "port": 56578,
+  "accounts": [
+    {
+      "loginname": "316637",
+      "password": "U5OO8VO62v"
+    },
+	{
+      "loginname": "316638",
+      "password": "nOAFFV5A2f"
+    }
+  ],
+  "vertex": {
+    "base_url": "http://187.0.0.1:2000",
+    "cookie": "SID=i8k2tqR0IeuJ1Lrk/G/Fnv7MYjX0t/yg; connect.sid=s:6a2077f4110b47e495af053209ba7992.sRry1DwheAdY1h5J+"
+  }
+}
