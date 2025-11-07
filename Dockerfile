@@ -13,7 +13,7 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # 复制应用代码
-COPY netcup_rss_control.py .
+COPY ncControl.py .
 COPY qb_client.py .
 COPY qb_rss.py .
 COPY logger.py .
@@ -25,4 +25,5 @@ ENV TZ=Asia/Shanghai
 EXPOSE 56578
 
 # 设置启动命令
-CMD ["python3", "netcup_rss_control.py"] 
+
+CMD ["python3", "ncControl.py"] 
