@@ -223,10 +223,10 @@ class NetcupTrafficThrottleTester:
                         try:
                             if new_throttled is False:
                                 logger.info(f"[首次-Vertex] 启用下载器({ip})")
-                                #self.enable_downloader(ip)
+                                self.enable_downloader(ip)
                             elif new_throttled is True:
                                 logger.info(f"[首次-Vertex] 暂停下载器({ip})")
-                                #self.disable_downloader(ip, url, username, password)
+                                self.disable_downloader(ip, url, username, password)
                                 
                         except Exception as e:
                             logger.error(f"[首次-联动] 处理 {ip} 时出错：{e}")
@@ -239,11 +239,11 @@ class NetcupTrafficThrottleTester:
                     try:
                         if old_throttled is True and new_throttled is False:
                             logger.info(f"[Vertex] 启用下载器({ip})")
-                            #self.enable_downloader(ip)
+                            self.enable_downloader(ip)
                         elif old_throttled is False and new_throttled is True:
                             # 暂停 qB 所有任务（该 IP 对应实例）
                             logger.info(f"[Vertex] 暂停下载器({ip})")
-                            #self.disable_downloader(ip, url, username, password)
+                            self.disable_downloader(ip, url, username, password)
                     except Exception as e:
                         logger.error(f"[联动] 处理 {ip} 的状态变化时出错：{e}")
                 else:
