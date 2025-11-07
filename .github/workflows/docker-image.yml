@@ -49,4 +49,3 @@ jobs:
         # 指定用户/仓库名
         tags: |
           ${{ secrets.DOCKER_USERNAME }}/mynccontrol:latest
-          ${{ secrets.DOCKER_USERNAME }}/mynccontrol:${{ env.app_version }}
