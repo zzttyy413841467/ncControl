@@ -1,0 +1,5 @@
+Flask
+netcup-webservice
+python-dotenv~=1.0.1
+qbittorrent-api
+requests
