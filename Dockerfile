@@ -3,6 +3,12 @@ FROM python:3.11-slim
 # 设置工作目录
 WORKDIR /app
 
+# 设置时区为中国东八区（Asia/Shanghai）
+ENV TZ=Asia/Shanghai
+RUN apt-get update && apt-get install -y tzdata && apt-get clean
+RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
+
+
 # 安装系统依赖
 RUN apt-get update && apt-get install -y \
     curl \
@@ -17,9 +23,7 @@ COPY ncControl.py .
 COPY qb_client.py .
 COPY qb_rss.py .
 COPY logger.py .
-
-# 设置环境变量默认值（只保留必要的）
-ENV TZ=Asia/Shanghai
+COPY frontend .
 
 # 暴露端口
 EXPOSE 56578

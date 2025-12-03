@@ -1,0 +1,244 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <title>Netcup 限速监控面板</title>
+    <style>
+        /* 这里保持之前的样式，也可以拆到单独 css 文件 */
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+            margin: 0;
+            padding: 0;
+            background: #f5f5f7;
+        }
+        header {
+            background: #111827;
+            color: #fff;
+            padding: 16px 24px;
+        }
+        header h1 {
+            margin: 0;
+            font-size: 20px;
+        }
+        header small {
+            color: #9ca3af;
+        }
+        main {
+            padding: 16px 24px 40px;
+        }
+        .toolbar {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 12px;
+        }
+        .toolbar input {
+            padding: 6px 8px;
+            border-radius: 4px;
+            border: 1px solid #d1d5db;
+            min-width: 220px;
+        }
+        .toolbar .meta {
+            font-size: 12px;
+            color: #6b7280;
+        }
+        table {
+            width: 100%;
+            border-collapse: collapse;
+            background: #fff;
+            border-radius: 8px;
+            overflow: hidden;
+            box-shadow: 0 1px 3px rgba(0,0,0,.06);
+        }
+        thead {
+            background: #f9fafb;
+        }
+        th, td {
+            padding: 8px 10px;
+            border-bottom: 1px solid #e5e7eb;
+            font-size: 13px;
+            text-align: left;
+            white-space: nowrap;
+        }
+        th {
+            font-weight: 600;
+            color: #4b5563;
+        }
+        tr:last-child td {
+            border-bottom: none;
+        }
+        .status-pill {
+            display: inline-flex;
+            align-items: center;
+            padding: 2px 8px;
+            border-radius: 999px;
+            font-size: 12px;
+            font-weight: 500;
+        }
+        .status-pill span.dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 999px;
+            display: inline-block;
+            margin-right: 6px;
+        }
+        .status-ok {
+            background: #ecfdf3;
+            color: #166534;
+        }
+        .status-ok span.dot {
+            background: #22c55e;
+        }
+        .status-throttled {
+            background: #fef2f2;
+            color: #b91c1c;
+        }
+        .status-throttled span.dot {
+            background: #ef4444;
+        }
+        tfoot td {
+            border-top: 1px solid #e5e7eb;
+            font-size: 12px;
+            color: #6b7280;
+        }
+        .center {
+            text-align: center;
+        }
+
+        /* 新增：summary 里“机器数 / 当前限速”文字高亮颜色 */
+        .summary-label-total {
+            color: #2563eb;
+            font-weight: 600;
+        }
+        .summary-label-throttled-ok {
+            color: #16a34a;
+            font-weight: 600;
+        }
+        .summary-label-throttled-alert {
+            color: #dc2626;
+            font-weight: 600;
+        }
+    </style>
+</head>
+<body>
+<header>
+    <h1>Netcup 限速监控面板</h1>
+    <small>实时查看每台机器是否限速，以及上一次限速的时间与时长</small>
+</header>
+<main>
+    <div class="toolbar">
+        <input type="text" id="search" placeholder="按 IP 模糊搜索..." />
+        <div class="meta">
+            <span id="summary"></span>
+            &nbsp;&nbsp;|&nbsp;&nbsp;
+            最后更新：<span id="last-updated">-</span>
+        </div>
+    </div>
+    <table>
+        <thead>
+        <tr>
+            <th>IP</th>
+            <th>当前状态</th>
+            <th>当前限速开始时间</th>
+            <th>当前已限速 (小时)</th>
+            <th>上一次限速开始</th>
+            <th>上一次限速恢复</th>
+            <th>上一次限速时长 (小时)</th>
+        </tr>
+        </thead>
+        <tbody id="tbody">
+        <tr><td colspan="7" class="center">加载中...</td></tr>
+        </tbody>
+        <tfoot>
+        <tr>
+            <td colspan="7" id="footer-text"></td>
+        </tr>
+        </tfoot>
+    </table>
+</main>
+<script>
+    const tbody = document.getElementById('tbody');
+    const lastUpdatedEl = document.getElementById('last-updated');
+    const summaryEl = document.getElementById('summary');
+    const footerText = document.getElementById('footer-text');
+    const searchInput = document.getElementById('search');
+
+    let rawData = [];
+
+    async function fetchStatus() {
+        try {
+            const resp = await fetch('/api/status');
+            const data = await resp.json();
+            rawData = data;
+            renderTable();
+            const now = new Date();
+            lastUpdatedEl.textContent = now.toLocaleString();
+        } catch (e) {
+            console.error(e);
+            tbody.innerHTML = '<tr><td colspan="7" class="center">获取数据失败</td></tr>';
+        }
+    }
+
+    function renderTable() {
+        const keyword = searchInput.value.trim();
+        let list = rawData || [];
+
+        if (keyword) {
+            list = list.filter(item =>
+                String(item.ipv4IP).includes(keyword)
+            );
+        }
+
+        if (!list.length) {
+            tbody.innerHTML = '<tr><td colspan="7" class="center">暂无数据</td></tr>';
+            // 无数据时也高亮“机器数：0”
+            summaryEl.innerHTML = '<span class="summary-label-total">机器数：0</span>';
+            footerText.textContent = '';
+            return;
+        }
+
+        const total = list.length;
+        const throttledCount = list.filter(x => x.trafficThrottled).length;
+
+        // 根据是否有机器在限速，切换“当前限速”文字颜色（绿 / 红）
+        const throttledClass = throttledCount > 0
+            ? 'summary-label-throttled-alert'
+            : 'summary-label-throttled-ok';
+
+        summaryEl.innerHTML = `
+            <span class="summary-label-total">机器数：${total}</span>
+            ，<span class="${throttledClass}">当前限速：${throttledCount}</span>
+        `;
+
+        tbody.innerHTML = list.map(row => {
+            const statusClass = row.trafficThrottled ? 'status-throttled' : 'status-ok';
+            const statusText = row.trafficThrottled ? '限速中' : '正常';
+
+            return `
+                <tr>
+                    <td>${row.ipv4IP}</td>
+                    <td>
+                        <span class="status-pill ${statusClass}">
+                            <span class="dot"></span>${statusText}
+                        </span>
+                    </td>
+                    <td>${row.currentThrottleStart || '-'}</td>
+                    <td>${row.currentThrottleDurationHours != null ? row.currentThrottleDurationHours : '-'}</td>
+                    <td>${row.lastThrottleStart || '-'}</td>
+                    <td>${row.lastThrottleRecover || '-'}</td>
+                    <td>${row.lastThrottleDurationHours != null ? row.lastThrottleDurationHours : '-'}</td>
+                </tr>
+            `;
+        }).join('');
+
+        footerText.textContent =
+            '说明：“当前限速开始/已限速时长”表示本轮尚未恢复的限速；“上一次限速*”表示最近一轮已经结束的限速。';
+    }
+
+    searchInput.addEventListener('input', renderTable);
+
+    fetchStatus();
+    setInterval(fetchStatus, 30000);
+</script>
+</body>
+</html>

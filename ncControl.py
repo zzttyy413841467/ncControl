@@ -6,7 +6,7 @@ import json
 import threading
 import time
 from datetime import datetime, timedelta
-from flask import Flask, jsonify, request
+from flask import Flask, jsonify, request, send_from_directory
 import logging
 import requests
 from netcup_webservice import NetcupWebservice
@@ -19,7 +19,8 @@ class NetcupTrafficThrottleTester:
         # 固定读取脚本同目录的config.json
         script_dir = os.path.dirname(os.path.abspath(__file__))
         self.config_file = os.path.join(script_dir, 'config.json')
-
+        self.frontend_dir = os.path.join(script_dir, 'frontend')  # 前端目录
+        
         # 数据缓存 - 存储所有VPS的信息
         # 格式: {"ipv4_ip": {"ipv4IP": "xxx", "trafficThrottled": bool}}
         self.cached_data = {}
@@ -34,6 +35,10 @@ class NetcupTrafficThrottleTester:
         vconf = config.get('vertex', {})
         self.vertex_base_url = vconf.get('base_url', '')
         self.vertex_cookie = vconf.get('cookie', '')
+
+        self.throttle_meta = {}
+        # 读写 cached_data / throttle_meta 时使用的锁
+        self.lock = threading.Lock()
 
         self.qb_rss = None
         if self.vertex_base_url:
@@ -66,11 +71,19 @@ class NetcupTrafficThrottleTester:
             logger.error(f"配置文件 {self.config_file} 不存在，请创建配置文件")
             return {}
         except json.JSONDecodeError as e:
-            logger.error(f"配置文件JSON格式错误11: {e}")
+            logger.error(f"配置文件JSON格式错误: {e}")
             return {}
         except Exception as e:
             logger.error(f"加载配置文件时发生错误: {e}")
             return {}
+			
+    def mask_ip(self, ip: str) -> str:
+        """ip脱敏操作"""
+        parts = ip.split(".")
+        if len(parts) != 4:
+            return ip
+        parts[-1] = "***"
+        return ".".join(parts)
 
     def setup_routes(self):
         """设置Flask路由"""
@@ -83,10 +96,12 @@ class NetcupTrafficThrottleTester:
                     return jsonify({"error": "缺少ipv4IP参数"}), 400
 
                 # 从缓存中查找对应的数据
-                if ipv4_ip in self.cached_data:
-                    return jsonify(self.cached_data[ipv4_ip])
-                else:
-                    return jsonify({"error": f"未找到IP {ipv4_ip} 的信息"}), 404
+                with self.lock:
+                    data = self.cached_data.get(ipv4_ip)
+                    
+                if data is not None:
+                    return jsonify(data)
+                return jsonify({"error": f"未找到IP {ipv4_ip} 的信息"}), 404
 
             except Exception as e:
                 logger.error(f"处理webhook请求时发生错误: {e}")
@@ -94,11 +109,87 @@ class NetcupTrafficThrottleTester:
 
         @self.app.route('/health', methods=['GET'])
         def health():
+            with self.lock:
+                total_servers = len(self.cached_data)
+                
             return jsonify({
                 "status": "ok",
                 "timestamp": datetime.now().isoformat(),
-                "total_servers": len(self.cached_data)
+                "total_servers": total_servers
             })
+        # 前端页面
+        @self.app.route('/dashboard', methods=['GET'])
+        def dashboard():
+            """返回前端页面"""
+            return send_from_directory(self.frontend_dir, 'index.html')
+
+        # 前端静态文件路由
+        @self.app.route('/frontend/<path:path>', methods=['GET'])
+        def frontend_assets(path):
+            """返回前端静态文件（js, css等）"""
+            return send_from_directory(self.frontend_dir, path)
+
+        # 获取状态数据的 API
+        @self.app.route('/api/status', methods=['GET'])
+        def api_status():
+            """
+            返回所有 Netcup 机器的限速统计信息：
+            - 是否限速（当前）
+            - 上一次限速开始时间
+            - 上一次限速恢复时间
+            - 上一次限速持续多少小时
+            - 当前如果正在限速，当前这一轮的开始时间和已持续时长
+            """
+            with self.lock:
+                items = list(self.cached_data.items())
+                meta_snapshot = {
+                    ip: meta.copy() for ip, meta in self.throttle_meta.items()
+                }
+                
+            now = datetime.now()
+            
+            # 格式化时间，加入毫秒部分，日期和时间之间用空格分隔
+            def format_datetime(dt):
+                if dt:
+                    # 获取毫秒部分并转化为字符串
+                    milliseconds = dt.microsecond // 1000
+                    return f"{dt.strftime('%Y-%m-%d-%H:%M:%S')}.{milliseconds:03d}"
+                return None
+            
+            data: list[dict] = []
+            for ip, payload in items:
+                meta = self.throttle_meta.get(ip, {})
+                traffic_throttled = bool(payload.get("trafficThrottled"))
+
+                current_start = meta.get("current_start")
+                last_start = meta.get("last_start")
+                last_end = meta.get("last_end")
+                last_duration_hours = meta.get("last_duration_hours")
+                
+                current_start = format_datetime(current_start)
+                last_start = format_datetime(last_start)
+                last_end = format_datetime(last_end)
+                
+                # 如果当前正在限速，计算到现在为止的持续时长（仅用于展示）
+                current_duration_hours = None
+                if traffic_throttled and current_start is not None:
+                    delta = now - meta["current_start"]
+                    current_duration_hours = round(delta.total_seconds() / 3600.0, 2)
+                
+                masked_ip  = self.mask_ip(ip)
+                data.append({
+                    "ipv4IP": masked_ip,
+                    "trafficThrottled": traffic_throttled,
+                    # 当前一轮限速信息（如果正在限速）
+                    "currentThrottleStart": current_start,
+                    "currentThrottleDurationHours": current_duration_hours,
+                    # 上一次完整限速信息
+                    "lastThrottleStart": last_start,
+                    "lastThrottleRecover": last_end,
+                    "lastThrottleDurationHours": last_duration_hours,
+                })
+
+            return jsonify(data)
 
     def get_vps_info_from_account(self, account):
         """从单个账户获取VPS信息"""
@@ -121,7 +212,7 @@ class NetcupTrafficThrottleTester:
 
                     # 提取serverInterfaces中的ipv4IP和trafficThrottled
                     if 'serverInterfaces' in vserver_info and vserver_info['serverInterfaces']:
-                        # 读取第一个接口的信息（按原需求）
+                        # 读取第一个接口的信息
                         interface = vserver_info['serverInterfaces'][0]
 
                         try:
@@ -163,13 +254,22 @@ class NetcupTrafficThrottleTester:
         return vps_data
 
     def get_traffic_throttled_by_value(self, ip: str):
-        return next(
-            (v.get("trafficThrottled") for v in self.cached_data.values() if v.get("ipv4IP") == ip),
-            None
-        )
+        """获取指定 IP 当前的 trafficThrottled 状态"""
+        with self.lock:
+            info = self.cached_data.get(ip)
+        if info is None:
+            return None
+        return info.get("trafficThrottled")
+        
     def enable_downloader(self, ip: str):
-        if self.qb_rss:
-            r = self.qb_rss.enable_downloader(ip)
+        if not self.qb_rss:
+            logger.warning(f"未配置 Vertex, 无法启用下载器{ip}")
+            return
+            
+        try:
+            self.qb_rss.enable_downloader(ip)
+        except Exception as e:
+            logger.error(f"启用 {ip} 下载器失败：{e}")
     
     def disable_downloader(
         self,
@@ -180,7 +280,10 @@ class NetcupTrafficThrottleTester:
     ):
     
         if self.qb_rss:
-            r = self.qb_rss.pause_downloader(ip)
+            try:
+                self.qb_rss.pause_downloader(ip)
+            except Exception as e:  
+                logger.error(f"暂停 {ip} 下载器{ip} 失败：{e}")
 
         try:
             qb = QBittorrentClient(url, username, password)
@@ -206,17 +309,28 @@ class NetcupTrafficThrottleTester:
                 account_data = self.get_vps_info_from_account(account)
                 new_data.update(account_data)
 
-            # 对比新旧状态，先不覆盖 cached_data
-            for ip, payload in new_data.items():
-                new_throttled = payload.get("trafficThrottled")
-                old_throttled = self.cached_data.get(ip, {}).get("trafficThrottled")
-                url, username, password = self.qb_rss.get_user_info(ip)
-                if url is None or username is None or password is None:
-                    continue
+            with self.lock:
+                # 对比新旧状态，先不覆盖 cached_data
+                for ip, payload in new_data.items():
+                    new_throttled = payload.get("trafficThrottled")
+                    old_throttled = self.cached_data.get(ip, {}).get("trafficThrottled")
+    
+                    # 确保 throttle_meta 里有这个 IP 的结构
+                    meta = self.throttle_meta.setdefault(ip, {
+                        "current_start": None,
+                        "last_start": None,
+                        "last_end": None,
+                        "last_duration_hours": None,
+                    })
+    
+                    url, username, password = self.qb_rss.get_user_info(ip)
+                    if url is None or username is None or password is None:
+                        continue
+                        
+                    logger.info(f"url : {url}, username :{username}, password ：{password}")
                     
-                logger.info(f"url : {url}, username :{username}, password ：{password}")
-                if old_throttled is None:
-                    # 首次发现
+                    if old_throttled is None:
+                        # 首次发现
                         logger.info(f"[状态监听] 首次发现 {ip}，trafficThrottled={new_throttled}")
                         # 按你之前的业务规则： 
                         # False -> 启用下载器；True -> 暂停所有任务并暂停下载器
@@ -226,34 +340,44 @@ class NetcupTrafficThrottleTester:
                                 self.enable_downloader(ip)
                             elif new_throttled is True:
                                 logger.info(f"[首次-Vertex] 暂停下载器({ip})")
+                                meta["current_start"] = now
                                 self.disable_downloader(ip, url, username, password)
                                 
                         except Exception as e:
                             logger.error(f"[首次-联动] 处理 {ip} 时出错：{e}")
-                    
-                elif old_throttled != new_throttled:
-                    logger.warning(f"[状态变化] {ip}: {old_throttled} -> {new_throttled}")
-                    # ---- 业务逻辑：
-                    # 1) 若 True -> False（解除限速）：启用该下载器（允许进入“限速态”下的收割流程，具体按你的面板策略）
-                    # 2) 若 False -> True（被限速）：暂停该 IP 的所有 qB 任务，并暂停该下载器（避免瞬时冲高）
-                    try:
-                        if old_throttled is True and new_throttled is False:
-                            logger.info(f"[Vertex] 启用下载器({ip})")
-                            self.enable_downloader(ip)
-                        elif old_throttled is False and new_throttled is True:
-                            # 暂停 qB 所有任务（该 IP 对应实例）
-                            logger.info(f"[Vertex] 暂停下载器({ip})")
-                            self.disable_downloader(ip, url, username, password)
-                    except Exception as e:
-                        logger.error(f"[联动] 处理 {ip} 的状态变化时出错：{e}")
-                else:
-                    logger.debug(f"[状态监听] {ip} 未变化：{new_throttled}")
+                        
+                    elif old_throttled != new_throttled:
+                        logger.warning(f"[状态变化] {ip}: {old_throttled} -> {new_throttled}")
+                        # ---- 业务逻辑：
+                        # 1) 若 True -> False（解除限速）：启用该下载器（允许进入“限速态”下的收割流程，具体按你的面板策略）
+                        # 2) 若 False -> True（被限速）：暂停该 IP 的所有 qB 任务，并暂停该下载器（避免瞬时冲高）
+                        try:
+                            if old_throttled is True and new_throttled is False:
+                                logger.info(f"[Vertex] 启用下载器({ip})")
+                                self.enable_downloader(ip)
+                                if meta.get("current_start") is not None:
+                                    meta["last_start"] = meta["current_start"]
+                                    meta["last_end"] = now
+                                    delta = now - meta["current_start"]
+                                    meta["last_duration_hours"] = round(
+                                        delta.total_seconds() / 3600.0, 2
+                                    )
+                                meta["current_start"] = None
+                            elif old_throttled is False and new_throttled is True:
+                                # 暂停 qB 所有任务（该 IP 对应实例）
+                                meta["current_start"] = now
+                                logger.info(f"[Vertex] 暂停下载器({ip})")
+                                self.disable_downloader(ip, url, username, password)
+                        except Exception as e:
+                            logger.error(f"[联动] 处理 {ip} 的状态变化时出错：{e}")
+                    else:
+                        logger.debug(f"[状态监听] {ip} 未变化：{new_throttled}")
 
-            # 更新缓存
-            self.cached_data = new_data
-            logger.info(f"数据更新成功，共缓存 {len(self.cached_data)} 个VPS IP信息")
-            for key, value in self.cached_data.items():
-                logger.info(f"缓存的详细信息 ipv4IP={value.get('ipv4IP')}, trafficThrottled={value.get('trafficThrottled')}")
+                # 更新缓存
+                self.cached_data = new_data
+                logger.info(f"数据更新成功，共缓存 {len(self.cached_data)} 个VPS IP信息")
+                for key, value in self.cached_data.items():
+                    logger.info(f"缓存的详细信息 ipv4IP={value.get('ipv4IP')}, trafficThrottled={value.get('trafficThrottled')}")
 
         except Exception as e:
             logger.error(f"更新缓存数据时发生错误: {e}")
