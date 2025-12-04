@@ -3,16 +3,20 @@
   "port": 56578,
   "accounts": [
     {
-      "loginname": "316633",
+      "loginname": "316622",
       "password": "U5OO8VO62v"
     },
 	{
-      "loginname": "316639",
+      "loginname": "316622",
       "password": "nOAFFV5A2f"
     }
   ],
   "vertex": {
-    "base_url": "http://187.0.0.1:2000",
-    "cookie": "SID=i8k2tqR0IeuJ1Lrk/G/Fnv7MYjX0t/yg; connect.sid=s:6a2077f4110b47e495af053209ba7992.sRry1DwheAdY1h5J+"
+    "base_url": "http://182.225.222.22:56521",
+    "cookie": "SID=i8k2tqR0IeuJ+SHBX38dxma"
+  },
+  "telegram": {
+    "bot_token": "8026878068:22222222222222222222222",
+    "chat_id": 2222222222,
   }
 }

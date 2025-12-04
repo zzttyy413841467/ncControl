@@ -14,12 +14,16 @@ from logger import logger
 from qb_client import QBittorrentClient
 from qb_rss import QBRSSClient
 
+APP_VERSION = "V1.0.0"
+
+
 class NetcupTrafficThrottleTester:
     def __init__(self):
         # 固定读取脚本同目录的config.json
         script_dir = os.path.dirname(os.path.abspath(__file__))
         self.config_file = os.path.join(script_dir, 'config.json')
         self.frontend_dir = os.path.join(script_dir, 'frontend')  # 前端目录
+        self.app_version = APP_VERSION
         
         # 数据缓存 - 存储所有VPS的信息
         # 格式: {"ipv4_ip": {"ipv4IP": "xxx", "trafficThrottled": bool}}
@@ -36,10 +40,16 @@ class NetcupTrafficThrottleTester:
         self.vertex_base_url = vconf.get('base_url', '')
         self.vertex_cookie = vconf.get('cookie', '')
 
+        # Telegram 相关配置（新增）
+        tconf = config.get('telegram', {})
+        self.tg_bot_token = tconf.get('bot_token', '')
+        self.tg_chat_id = tconf.get('chat_id')
+
         self.throttle_meta = {}
         # 读写 cached_data / throttle_meta 时使用的锁
         self.lock = threading.Lock()
 
+        self.tg_update_offset: int = 0
         self.qb_rss = None
         if self.vertex_base_url:
             # 供本需求使用：以类形式控制 Vertex 下载器
@@ -53,6 +63,13 @@ class NetcupTrafficThrottleTester:
         self.data_thread = threading.Thread(target=self.data_collection_loop, daemon=True)
         self.data_thread.start()
 
+        # 启动 Telegram 轮询线程（不需要 Webhook）
+        if self.tg_bot_token:
+            self.setup_tg_commands()
+            self.tg_thread = threading.Thread(
+                target=self.telegram_poll_loop, daemon=True
+            )
+            self.tg_thread.start()
         logger.info(f"NetcupTrafficThrottleTester初始化完成")
         logger.info(f"Webhook路径: {self.webhook_path}")
         logger.info(f"端口: {self.port}")
@@ -60,6 +77,7 @@ class NetcupTrafficThrottleTester:
         logger.info(f"加载了 {len(self.accounts)} 个账户")
         logger.info(f"Vertex: base_url={self.vertex_base_url}")
         logger.info(f"Vertex cookie configured: {bool(self.vertex_cookie)}")
+        logger.info(f"Telegram bot 已配置: {bool(self.tg_bot_token)}")
 
     def load_config(self):
         """加载配置文件"""
@@ -84,6 +102,171 @@ class NetcupTrafficThrottleTester:
             return ip
         parts[-1] = "***"
         return ".".join(parts)
+
+    # ---------------- Telegram 相关辅助方法（新增） ----------------
+
+    def send_telegram_message(self, chat_id, text: str, reply_markup: dict | None = None):
+        """发送 Telegram 文本消息（简单封装，使用 requests）"""
+        if not self.tg_bot_token:
+            logger.debug("Telegram bot 未配置，跳过发送消息")
+            return
+        try:
+            url = f"https://api.telegram.org/bot{self.tg_bot_token}/sendMessage"
+            payload = {
+                "chat_id": chat_id,
+                "text": text,
+                "parse_mode": "Markdown"
+            }
+            if reply_markup:
+                payload["reply_markup"] = reply_markup
+            resp = requests.post(url, json=payload, timeout=10)
+            if not resp.ok:
+                logger.warning(f"发送 Telegram 消息失败: {resp.status_code} {resp.text}")
+        except Exception as e:
+            logger.error(f"发送 Telegram 消息异常: {e}")
+
+
+    def setup_tg_commands(self):
+        """设置 Telegram 左下角菜单按钮中的命令列表"""
+        url = f"https://api.telegram.org/bot{self.tg_bot_token}/setMyCommands"
+        commands = {
+            "commands": [
+                {"command": "status", "description": "获取所有nc机器状态"},
+                {"command": "version", "description": "获取软件版本编号"},
+            ]
+        }
+        try:
+            resp = requests.post(url, json=commands, timeout=10)
+            data = resp.json()
+            if not data.get("ok", False):
+                logger.error(f"设置 Telegram 命令失败: {data}")
+            else:
+                logger.info("Telegram Bot 命令菜单设置成功")
+        except Exception as e:
+            logger.error(f"设置 Telegram 命令时出错: {e}")
+
+
+    def send_telegram_menu(self, chat_id):
+        """发送一个简单菜单，包含“查询所有nc机器状态”按钮"""
+        keyboard = {
+            "keyboard": [
+                [{"text": "获取所有nc机器状态"}],
+            ],
+            "resize_keyboard": True,
+            "one_time_keyboard": False
+        }
+        self.send_telegram_message(chat_id, "请选择操作：", reply_markup=keyboard)
+
+    def handle_tg_version_command(self, chat_id):
+        """处理“获取软件版本”命令"""
+        text = (
+            "*当前软件版本*\n"
+            f"`{self.app_version}`\n\n"
+        )
+        self.send_telegram_message(chat_id, text)
+
+    def handle_tg_status_command(self, chat_id):
+        """处理“查询所有nc机器状态”命令，快速返回当前缓存状态"""
+        with self.lock:
+            items = list(self.cached_data.items())
+
+        if not items:
+            self.send_telegram_message(chat_id, "当前没有缓存的 Netcup 机器数据，请稍后再试。")
+            return
+
+        total = len(items)
+        throttled = 0
+        lines = []
+        for ip, payload in items:
+            status = payload.get("trafficThrottled")
+            if status:
+                throttled += 1
+            emoji = "🔴" if status else "🟢"
+            masked_ip = self.mask_ip(ip)
+            lines.append(f"{emoji} {masked_ip} - {'限速中' if status else '正常'}")
+
+        msg = [
+            f"*NC 机器状态汇总*",
+            f"总数：{total}，当前限速：{throttled} 台",
+            "",
+            *lines
+        ]
+        self.send_telegram_message(chat_id, "\n".join(msg))
+
+    def notify_telegram_state_change(self, ip: str, old_throttled, new_throttled):
+        """当某个 IP 状态变化时，推送到默认 Telegram 机器人"""
+        if not self.tg_bot_token or not self.tg_chat_id:
+            # 未配置默认 chat，无通知
+            return
+
+        masked_ip = self.mask_ip(ip)
+        def state_text(v):
+            if v is True:
+                return "限速中"
+            if v is False:
+                return "正常"
+            return "未知"
+
+        text = (
+            "⚠️ *NC 机器状态变更*\n"
+            f"IP：{masked_ip}\n"
+            f"状态：{state_text(old_throttled)} ➜ {state_text(new_throttled)}\n"
+            f"时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+        )
+        self.send_telegram_message(self.tg_chat_id, text)
+
+    def telegram_poll_loop(self) :
+        """使用 getUpdates 轮询获取 Bot 消息，不依赖 Webhook"""
+        logger.info("Telegram 轮询线程已启动")
+        base_url = f"https://api.telegram.org/bot{self.tg_bot_token}/getUpdates"
+
+        while True:
+            try:
+                resp = requests.get(
+                    base_url,
+                    params={
+                        "timeout": 50,
+                        "offset": self.tg_update_offset + 1,
+                    },
+                    timeout=60,
+                )
+                data = resp.json()
+                for update in data.get("result", []):
+                    self.tg_update_offset = update.get("update_id", self.tg_update_offset)
+
+                    message = update.get("message") or update.get("edited_message")
+                    if not message:
+                        continue
+
+                    chat = message.get("chat") or {}
+                    chat_id = chat.get("id")
+                    if not chat_id:
+                        continue
+
+                    text = (message.get("text") or "").strip()
+                    if not text:
+                        continue
+
+                    logger.info(f"收到 Telegram 消息 chat_id={chat_id}, text={text!r}")
+
+                    if text in ("/start", "start"):
+                        self.send_telegram_menu(chat_id)
+                    elif text in ("获取所有nc机器状态", "/status"):
+                        self.handle_tg_status_command(chat_id)
+                    elif text in ("获取软件版本编号", "/version"):
+                        self.handle_tg_version_command(chat_id)
+                    else:
+                        self.send_telegram_message(
+                            chat_id,
+                            "可用命令：\n"
+                            "- /status获取所有nc机器状态：获取所有nc机器状态\n"
+                            "- /version获取软件版本：获取软件版本",
+                        )
+            except Exception as e:
+                logger.error(f"Telegram 轮询出错: {e}")
+                time.sleep(5)
+
+    # ---------------- Flask 路由 ----------------
 
     def setup_routes(self):
         """设置Flask路由"""
@@ -158,7 +341,15 @@ class NetcupTrafficThrottleTester:
             
             data: list[dict] = []
             for ip, payload in items:
-                meta = self.throttle_meta.get(ip, {})
+                meta = meta_snapshot.get(
+                    ip,
+                    {
+                        "current_start": None,
+                        "last_start": None,
+                        "last_end": None,
+                        "last_duration_hours": None,
+                    },
+                )
                 traffic_throttled = bool(payload.get("trafficThrottled"))
 
                 current_start = meta.get("current_start")
@@ -295,7 +486,7 @@ class NetcupTrafficThrottleTester:
             
         
     def update_cached_data(self):
-        """更新缓存的数据，并在状态变化时联动 Vertex 下载器"""
+        """更新缓存的数据，并在状态变化时联动 Vertex 下载器 + 推送 Telegram"""
         try:
             new_data = {}
 
@@ -308,6 +499,7 @@ class NetcupTrafficThrottleTester:
                 #logger.info(f"正在从账户 {account['loginname']} 获取VPS信息...")
                 account_data = self.get_vps_info_from_account(account)
                 new_data.update(account_data)
+            now = datetime.now()  # 新增：统一使用当前时间
 
             with self.lock:
                 # 对比新旧状态，先不覆盖 cached_data
@@ -370,6 +562,9 @@ class NetcupTrafficThrottleTester:
                                 self.disable_downloader(ip, url, username, password)
                         except Exception as e:
                             logger.error(f"[联动] 处理 {ip} 的状态变化时出错：{e}")
+
+                        # 状态变更时，推送到 Telegram（新增）
+                        self.notify_telegram_state_change(ip, old_throttled, new_throttled)
                     else:
                         logger.debug(f"[状态监听] {ip} 未变化：{new_throttled}")
 
@@ -400,8 +595,6 @@ class NetcupTrafficThrottleTester:
     def run(self):
         """启动Flask应用"""
         logger.info(f"启动Web服务，端口: {self.port}")
-        logger.info(f"Webhook URL: http://localhost:{self.port}{self.webhook_path}")
-        logger.info(f"使用方法: GET/POST {self.webhook_path}?ipv4IP=YOUR_IP")
         self.app.run(host='0.0.0.0', port=self.port, debug=False)
 
 def main():
