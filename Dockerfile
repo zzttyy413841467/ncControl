@@ -23,7 +23,7 @@ COPY ncControl.py .
 COPY qb_client.py .
 COPY qb_rss.py .
 COPY logger.py .
-COPY frontend .
+COPY frontend ./frontend
 
 # 暴露端口
 EXPOSE 56578
@@ -31,3 +31,4 @@ EXPOSE 56578
 # 设置启动命令
 
 CMD ["python3", "ncControl.py"] 
+
