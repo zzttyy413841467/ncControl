@@ -9,7 +9,7 @@ on:
 # 项目任务，任务之间可以并行调度
 jobs:
   build:
-    # 只有提交信息包含 [build] 时才执行打包；关键字可自行修改
+    # 只有提交信息包含 '打包' 时才执行打包；关键字可自行修改
     if: "contains(github.event.head_commit.message, '打包')"
   # 选择云端运行的环境
     runs-on: ubuntu-latest
@@ -50,4 +50,4 @@ jobs:
         push: true
         # 指定用户/仓库名
         tags: |
-          ${{ secrets.DOCKER_USERNAME }}/mynccontrol:latest
+          ${{ secrets.DOCKER_USERNAME }}/mynccontrol:v1.0.1
