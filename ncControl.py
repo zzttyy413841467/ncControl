@@ -147,7 +147,7 @@ class NetcupTrafficThrottleTester:
 
 
     def send_telegram_menu(self, chat_id):
-        """发送一个简单菜单，包含“查询所有nc机器状态”按钮"""
+        """发送一个简单菜单，包含“获取所有nc机器状态”按钮"""
         keyboard = {
             "keyboard": [
                 [{"text": "获取所有nc机器状态"}],
@@ -166,7 +166,7 @@ class NetcupTrafficThrottleTester:
         self.send_telegram_message(chat_id, text)
 
     def handle_tg_status_command(self, chat_id):
-        """处理“查询所有nc机器状态”命令，快速返回当前缓存状态"""
+        """处理“获取所有nc机器状态”命令，快速返回当前缓存状态"""
         with self.lock:
             items = list(self.cached_data.items())
 
@@ -249,9 +249,9 @@ class NetcupTrafficThrottleTester:
 
                     logger.info(f"收到 Telegram 消息 chat_id={chat_id}, text={text!r}")
 
-                    if text in ("/start", "start"):
-                        self.send_telegram_menu(chat_id)
-                    elif text in ("获取所有nc机器状态", "/status"):
+                    #if text in ("/start", "start"):
+                    #    self.send_telegram_menu(chat_id)
+                    if text in ("获取所有nc机器状态", "/status"):
                         self.handle_tg_status_command(chat_id)
                     elif text in ("获取软件版本编号", "/version"):
                         self.handle_tg_version_command(chat_id)
