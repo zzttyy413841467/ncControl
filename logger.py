@@ -29,4 +29,4 @@ def setup_logger(name, log_file=None, level=logging.INFO, encoding='utf-8'):
 
 
 # 创建主日志
-logger = setup_logger('main_logger', 'rss.log')
+logger = setup_logger('main_logger', '/app/log/rss.log')

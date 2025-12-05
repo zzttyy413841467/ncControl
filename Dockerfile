@@ -3,6 +3,8 @@ FROM python:3.11-slim
 # 设置工作目录
 WORKDIR /app
 
+RUN mkdir log
+
 # 设置时区为中国东八区（Asia/Shanghai）
 ENV TZ=Asia/Shanghai
 RUN apt-get update && apt-get install -y tzdata && apt-get clean
