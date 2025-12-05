@@ -14,7 +14,7 @@ from logger import logger
 from qb_client import QBittorrentClient
 from qb_rss import QBRSSClient
 
-APP_VERSION = "V1.0.0"
+APP_VERSION = "V1.0.1"
 
 
 class NetcupTrafficThrottleTester:
