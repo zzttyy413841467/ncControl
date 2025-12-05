@@ -240,9 +240,9 @@ class NetcupTrafficThrottleTester:
 
                     chat = message.get("chat") or {}
                     chat_id = chat.get("id")
-                    if not chat_id:
+                    if not chat_id or str(chat_id) != str(self.tg_chat_id):
                         continue
-
+                        
                     text = (message.get("text") or "").strip()
                     if not text:
                         continue
