@@ -71,7 +71,6 @@ class NetcupTrafficThrottleTester:
             )
             self.tg_thread.start()
         logger.info(f"NetcupTrafficThrottleTester初始化完成")
-        logger.info(f"Webhook路径: {self.webhook_path}")
         logger.info(f"端口: {self.port}")
         logger.info(f"配置文件: {self.config_file}")
         logger.info(f"加载了 {len(self.accounts)} 个账户")
