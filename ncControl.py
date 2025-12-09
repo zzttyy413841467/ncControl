@@ -208,7 +208,7 @@ class NetcupTrafficThrottleTester:
 
         text = (
             "⚠️ *NC 机器状态变更*\n"
-            f"IP：{masked_ip}\n"
+            f"IP：`{masked_ip}`\n"
             f"状态：{state_text(old_throttled)} ➜ {state_text(new_throttled)}\n"
             f"时间：{datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
         )
