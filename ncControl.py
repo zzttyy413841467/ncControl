@@ -14,7 +14,7 @@ from logger import logger
 from qb_client import QBittorrentClient
 from qb_rss import QBRSSClient
 
-APP_VERSION = "v1.0.3"
+APP_VERSION = "v1.0.4"
 
 
 class NetcupTrafficThrottleTester:
@@ -182,7 +182,7 @@ class NetcupTrafficThrottleTester:
                 throttled += 1
             emoji = "🔴" if status else "🟢"
             masked_ip = self.mask_ip(ip)
-            lines.append(f"{emoji} {masked_ip} - {'限速中' if status else '正常'}")
+            lines.append(f"{emoji} `{masked_ip}` - {'限速中' if status else '正常'}")
 
         msg = [
             f"*NC 机器状态汇总*",
