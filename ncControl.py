@@ -14,7 +14,7 @@ from logger import logger
 from qb_client import QBittorrentClient
 from qb_rss import QBRSSClient
 
-APP_VERSION = "v1.0.4"
+APP_VERSION = "v1.0.5"
 
 
 class NetcupTrafficThrottleTester:
@@ -248,8 +248,7 @@ class NetcupTrafficThrottleTester:
 
                     logger.info(f"收到 Telegram 消息 chat_id={chat_id}, text={text!r}")
 
-                    #if text in ("/start", "start"):
-                    #    self.send_telegram_menu(chat_id)
+
                     if text in ("获取所有nc机器状态", "/status"):
                         self.handle_tg_status_command(chat_id)
                     elif text in ("获取软件版本编号", "/version"):

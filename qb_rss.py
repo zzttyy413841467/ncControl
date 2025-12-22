@@ -62,8 +62,10 @@ class QBRSSClient:
         for d in downloaders:
             cu = d.get("clientUrl") or d.get("url") or ""
             host = QBRSSClient._extract_host(cu) if cu else None
-            if host == key or (isinstance(cu, str) and key in cu):
-                return d
+            if host is not None:
+                if host == key:
+                    return d
+                continue
         return None
         
     def get_qb_info(self, ip_or_id: str):            
