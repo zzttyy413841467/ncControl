@@ -41,7 +41,9 @@ class QBittorrentClient:
         """
         暂停所有种子任务，并检查是否全部暂停成功。
         """
-        self.client.torrents.pause.all()
+        self.client.torrents_reannounce(torrent_hashes="all")  # 强制汇报
+        self.client.torrents_stop(torrent_hashes="all")
+        
         logger.info("已发出暂停所有种子任务的指令。")
             
     def delete_all(self, *, delete_files: bool = False) -> None:
