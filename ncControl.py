@@ -13,8 +13,9 @@ from netcup_webservice import NetcupWebservice
 from logger import logger
 from qb_client import QBittorrentClient
 from qb_rss import QBRSSClient
+import re
 
-APP_VERSION = "v1.0.5"
+APP_VERSION = "v1.0.6"
 
 
 class NetcupTrafficThrottleTester:
@@ -39,12 +40,19 @@ class NetcupTrafficThrottleTester:
         vconf = config.get('vertex', {})
         self.vertex_base_url = vconf.get('base_url', '')
         self.vertex_cookie = vconf.get('cookie', '')
+        self.vertex_username = vconf.get('username', '')
+        self.vertex_password = vconf.get('password', '')
 
         # Telegram 相关配置（新增）
         tconf = config.get('telegram', {})
         self.tg_bot_token = tconf.get('bot_token', '')
         self.tg_chat_id = tconf.get('chat_id')
 
+        qconf = config.get('qbittorrent', {})
+        self.qb_except_categories = qconf.get('except_categories', '')
+        
+        self.qb_except_categories_list = self.parse_except_categories(self.qb_except_categories)
+        self.bqb_except_categories_list = bool(self.qb_except_categories_list)
         self.throttle_meta = {}
         # 读写 cached_data / throttle_meta 时使用的锁
         self.lock = threading.Lock()
@@ -53,7 +61,7 @@ class NetcupTrafficThrottleTester:
         self.qb_rss = None
         if self.vertex_base_url:
             # 供本需求使用：以类形式控制 Vertex 下载器
-            self.qb_rss = QBRSSClient(base=self.vertex_base_url, cookie=self.vertex_cookie)
+            self.qb_rss = QBRSSClient(base=self.vertex_base_url, cookie=self.vertex_cookie, username=self.vertex_username, password=self.vertex_password)
 
         # 创建Flask应用
         self.app = Flask(__name__)
@@ -76,6 +84,8 @@ class NetcupTrafficThrottleTester:
         logger.info(f"加载了 {len(self.accounts)} 个账户")
         logger.info(f"Vertex: base_url={self.vertex_base_url}")
         logger.info(f"Vertex cookie configured: {bool(self.vertex_cookie)}")
+        logger.info(f"Vertex username configured: {bool(self.vertex_username)}")
+        logger.info(f"qb except categories list: {self.qb_except_categories_list}")
         logger.info(f"Telegram bot 已配置: {bool(self.tg_bot_token)}")
 
     def load_config(self):
@@ -93,6 +103,16 @@ class NetcupTrafficThrottleTester:
         except Exception as e:
             logger.error(f"加载配置文件时发生错误: {e}")
             return {}
+            
+    def parse_except_categories(self, raw: str) -> list[str]:
+        """
+        兼容：英文逗号/中文逗号/分号/竖线等
+        """
+        if not raw:
+            return []
+        parts = re.split(r"[,\uFF0C;；|]+", raw)
+        return [p.strip() for p in parts if p.strip()]
+
 			
     def mask_ip(self, ip: str) -> str:
         """ip脱敏操作"""
@@ -229,6 +249,9 @@ class NetcupTrafficThrottleTester:
                     },
                     timeout=60,
                 )
+                if resp.status_code != 200:
+                    logger.error(f"请求失败，HTTP 状态码: {resp.status_code}")
+                    continue
                 data = resp.json()
                 for update in data.get("result", []):
                     self.tg_update_offset = update.get("update_id", self.tg_update_offset)
@@ -260,6 +283,9 @@ class NetcupTrafficThrottleTester:
                             "- /status获取所有nc机器状态：获取所有nc机器状态\n"
                             "- /version获取软件版本：获取软件版本",
                         )
+            except requests.exceptions.RequestException as e:
+                logger.error(f"请求异常: {e}")
+                time.sleep(5)  # 等待 5 秒后重试
             except Exception as e:
                 logger.error(f"Telegram 轮询出错: {e}")
                 time.sleep(5)
@@ -466,6 +492,7 @@ class NetcupTrafficThrottleTester:
         url: str | None = None,
         username: str | None = None,
         password: str | None = None,
+        except_categories: bool = False
     ):
     
         if self.qb_rss:
@@ -476,9 +503,12 @@ class NetcupTrafficThrottleTester:
 
         try:
             qb = QBittorrentClient(url, username, password)
-            qb.pause_all()
-            time.sleep(5)
-            qb.delete_all(delete_files=True)
+            if except_categories:
+                qb.stop_report_delete_all_except_categories(self.qb_except_categories_list)
+            else:
+                qb.pause_all()
+                time.sleep(5)
+                qb.delete_all(delete_files=True)
         except Exception as e:
             logger.error(f"暂停 {ip} 所有任务失败：{e}")
             
