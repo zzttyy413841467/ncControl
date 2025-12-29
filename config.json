@@ -13,7 +13,12 @@
   ],
   "vertex": {
     "base_url": "http://182.225.222.22:56521",
-    "cookie": "SID=i8k2tqR0IeuJ+SHBX38dxma"
+    "cookie": "完整字段"
+    "username": "admin",
+    "password": "123321"
+  },
+  "qbittorrent": {
+    "except_categories": "不可说,HR"
   },
   "telegram": {
     "bot_token": "",
