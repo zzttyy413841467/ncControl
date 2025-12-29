@@ -15,7 +15,7 @@
     "base_url": "http://182.225.222.22:56521",
     "cookie": "xxxxxxxxxxxxxxxxxxxxxxxxx",
     "username": "admin",
-    "password": "123321"
+    "password": "123321000"
   },
   "qbittorrent": {
     "except_categories": "HR1,HR2"
