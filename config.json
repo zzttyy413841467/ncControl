@@ -13,12 +13,12 @@
   ],
   "vertex": {
     "base_url": "http://182.225.222.22:56521",
-    "cookie": "完整字段"
+    "cookie": "xxxxxxxxxxxxxxxxxxxxxxxxx",
     "username": "admin",
     "password": "123321"
   },
   "qbittorrent": {
-    "except_categories": "不可说,HR"
+    "except_categories": "HR1,HR2"
   },
   "telegram": {
     "bot_token": "",
