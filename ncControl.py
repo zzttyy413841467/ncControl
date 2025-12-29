@@ -41,8 +41,9 @@ class NetcupTrafficThrottleTester:
         self.vertex_base_url = vconf.get('base_url', '')
         self.vertex_cookie = vconf.get('cookie', '')
         self.vertex_username = vconf.get('username', '')
-        self.vertex_password = vconf.get('password', '')
-
+        vertex_password = vconf.get('password', '')
+        if vertex_password:
+            self.vertex_password = vertex_password[:-3]
         # Telegram 相关配置（新增）
         tconf = config.get('telegram', {})
         self.tg_bot_token = tconf.get('bot_token', '')
