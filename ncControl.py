@@ -317,6 +317,23 @@ class NetcupTrafficThrottleTester:
                 s = os.path.join(root, fn)
                 t = os.path.join(target_root, fn)
                 shutil.copy2(s, t)
+                
+    def _run(cmd: list[str]) -> tuple[bool, str]:
+        try:
+            p = subprocess.run(
+                cmd,
+                check=True,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                text=True,
+            )
+            out = (p.stdout or "").strip()
+            err = (p.stderr or "").strip()
+            return True, (out + ("\n" + err if err else "")).strip()
+        except subprocess.CalledProcessError as e:
+            out = (e.stdout or "").strip()
+            err = (e.stderr or "").strip()
+            return False, (out + ("\n" + err if err else "")).strip() or str(e)
 
     def perform_self_upgrade(self) -> tuple[bool, str]:
         """
@@ -334,7 +351,7 @@ class NetcupTrafficThrottleTester:
         # clone 到临时目录再覆盖（不覆盖 config.json）
         try:
             with tempfile.TemporaryDirectory(prefix="ncControl_upgrade_") as td:
-                ok, detail = _run(["git", "clone", "--depth", "1", GITHUB_REPO_URL, td])
+                ok, detail = self._run(["git", "clone", "--depth", "1", GITHUB_REPO_URL, td])
                 if not ok:
                     return False, f"clone 失败：{detail}"
                 self._copy_repo_overwrite(td, repo_dir)
