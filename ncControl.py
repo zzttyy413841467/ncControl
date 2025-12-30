@@ -20,7 +20,7 @@ import subprocess
 import tempfile
 import shutil
 
-APP_VERSION = "v1.0.71"
+APP_VERSION = "v1.0.7"
 
 # === 新增：GitHub 仓库信息（按你要求固定到该 repo）===
 GITHUB_OWNER = "linlix0310"
@@ -321,32 +321,24 @@ class NetcupTrafficThrottleTester:
     def perform_self_upgrade(self) -> tuple[bool, str]:
         """
         执行升级：
-        - 若当前目录存在 .git：git fetch + git pull
-        - 否则：clone 到临时目录，然后覆盖拷贝到当前目录（不覆盖 config.json）
+        直接 clone 覆盖
         """
         repo_dir = self.script_dir
-        git_dir = os.path.join(repo_dir, ".git")
-
+        
         # 确保 git 可用
         try:
             subprocess.run(["git", "--version"], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         except Exception as e:
             return False, f"未检测到 git 或 git 不可用：{e}"
-
+            
+        # clone 到临时目录再覆盖（不覆盖 config.json）
         try:
-            if os.path.isdir(git_dir):
-                # 直接 pull
-                subprocess.run(["git", "-C", repo_dir, "fetch", "--tags", "--prune"], check=True)
-                subprocess.run(["git", "-C", repo_dir, "pull", "--rebase"], check=True)
-                return True, "git pull 成功"
-            else:
-                # clone + 覆盖
-                with tempfile.TemporaryDirectory(prefix="ncControl_upgrade_") as td:
-                    subprocess.run(["git", "clone", "--depth", "1", GITHUB_REPO_URL, td], check=True)
-                    self._copy_repo_overwrite(td, repo_dir)
-                return True, "clone 并覆盖更新成功"
-        except subprocess.CalledProcessError as e:
-            return False, f"git 命令执行失败：{e}"
+            with tempfile.TemporaryDirectory(prefix="ncControl_upgrade_") as td:
+                ok, detail = _run(["git", "clone", "--depth", "1", GITHUB_REPO_URL, td])
+                if not ok:
+                    return False, f"clone 失败：{detail}"
+                self._copy_repo_overwrite(td, repo_dir)
+            return True, "clone 并覆盖更新成功"
         except Exception as e:
             return False, f"升级异常：{e}"
 
