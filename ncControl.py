@@ -20,7 +20,7 @@ import subprocess
 import tempfile
 import shutil
 
-APP_VERSION = "v1.0.7"
+APP_VERSION = "v1.0.71"
 
 # === 新增：GitHub 仓库信息（按你要求固定到该 repo）===
 GITHUB_OWNER = "linlix0310"
