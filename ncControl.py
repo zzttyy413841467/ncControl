@@ -15,13 +15,24 @@ from qb_client import QBittorrentClient
 from qb_rss import QBRSSClient
 import re
 
-APP_VERSION = "v1.0.6"
+# === 新增：升级相关标准库 ===
+import subprocess
+import tempfile
+import shutil
 
+APP_VERSION = "v1.0.7"
+
+# === 新增：GitHub 仓库信息（按你要求固定到该 repo）===
+GITHUB_OWNER = "linlix0310"
+GITHUB_REPO = "ncControl"
+GITHUB_REPO_URL = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}.git"
+GITHUB_API_BASE = "https://api.github.com"
 
 class NetcupTrafficThrottleTester:
     def __init__(self):
         # 固定读取脚本同目录的config.json
         script_dir = os.path.dirname(os.path.abspath(__file__))
+        self.script_dir = script_dir  # 新增：升级时用
         self.config_file = os.path.join(script_dir, 'config.json')
         self.frontend_dir = os.path.join(script_dir, 'frontend')  # 前端目录
         self.app_version = APP_VERSION
@@ -42,8 +53,9 @@ class NetcupTrafficThrottleTester:
         self.vertex_cookie = vconf.get('cookie', '')
         self.vertex_username = vconf.get('username', '')
         vertex_password = vconf.get('password', '')
-        if vertex_password:
-            self.vertex_password = vertex_password[:-3]
+        # 小修：避免 vertex_password 为空时 self.vertex_password 未定义
+        self.vertex_password = (vertex_password[:-3] if vertex_password else "")
+
         # Telegram 相关配置（新增）
         tconf = config.get('telegram', {})
         self.tg_bot_token = tconf.get('bot_token', '')
@@ -153,6 +165,9 @@ class NetcupTrafficThrottleTester:
             "commands": [
                 {"command": "status", "description": "获取所有nc机器状态"},
                 {"command": "version", "description": "获取软件版本编号"},
+                # === 新增 ===
+                {"command": "latest", "description": "查询GitHub最新版本"},
+                {"command": "upgrade", "description": "一键升级到最新版本"},
             ]
         }
         try:
@@ -184,6 +199,189 @@ class NetcupTrafficThrottleTester:
             f"`{self.app_version}`\n\n"
         )
         self.send_telegram_message(chat_id, text)
+
+    # ================== 新增：GitHub 最新版本查询 & 一键升级 ==================
+
+    @staticmethod
+    def _normalize_ver(v: str) -> str:
+        return (v or "").strip()
+
+    @staticmethod
+    def _ver_tuple(v: str) -> tuple:
+        """
+        把 v1.2.3 / 1.2.3 转成 (1,2,3) 用于比较；解析失败则返回原字符串的 tuple
+        """
+        s = (v or "").strip()
+        if s.startswith("v") or s.startswith("V"):
+            s = s[1:]
+        parts = s.split(".")
+        nums = []
+        for p in parts:
+            if p.isdigit():
+                nums.append(int(p))
+            else:
+                # 不纯数字，直接降级为字符串比较
+                return (v,)
+        return tuple(nums)
+
+    def get_github_latest_version(self) -> tuple[str | None, str | None]:
+        """
+        返回 (latest_version_tag, error_message)
+        优先 releases/latest；失败则 fallback tags?per_page=1
+        """
+        headers = {
+            "Accept": "application/vnd.github+json",
+            "User-Agent": "ncControl",
+        }
+
+        # 1) releases/latest
+        try:
+            url = f"{GITHUB_API_BASE}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/releases/latest"
+            r = requests.get(url, headers=headers, timeout=10)
+            if r.status_code == 200:
+                data = r.json()
+                tag = data.get("tag_name") or data.get("name")
+                if tag:
+                    return self._normalize_ver(tag), None
+            else:
+                logger.info(f"GitHub releases/latest 返回: {r.status_code}")
+        except Exception as e:
+            logger.warning(f"获取 GitHub releases/latest 失败: {e}")
+
+        # 2) tags fallback
+        try:
+            url = f"{GITHUB_API_BASE}/repos/{GITHUB_OWNER}/{GITHUB_REPO}/tags?per_page=1"
+            r = requests.get(url, headers=headers, timeout=10)
+            if r.status_code == 200:
+                arr = r.json()
+                if isinstance(arr, list) and arr:
+                    tag = arr[0].get("name")
+                    if tag:
+                        return self._normalize_ver(tag), None
+                return None, "tags 为空"
+            return None, f"tags 请求失败: HTTP {r.status_code}"
+        except Exception as e:
+            return None, f"请求异常: {e}"
+
+    def handle_tg_latest_command(self, chat_id):
+        latest, err = self.get_github_latest_version()
+        if err or not latest:
+            self.send_telegram_message(chat_id, f"❌ 获取 GitHub 最新版本失败：`{err or 'unknown error'}`")
+            return
+
+        cur = self._normalize_ver(self.app_version)
+        msg = [
+            "*版本信息*",
+            f"- 当前版本：`{cur}`",
+            f"- GitHub 最新：`{latest}`",
+        ]
+
+        # 给个比较结论
+        try:
+            if self._ver_tuple(latest) > self._ver_tuple(cur):
+                msg.append("\n✅ 检测到新版本，可发送 `/upgrade` 一键升级。")
+            else:
+                msg.append("\n🟢 当前已是最新版本。")
+        except Exception:
+            msg.append("\n（版本号比较失败，仅供参考）")
+
+        self.send_telegram_message(chat_id, "\n".join(msg))
+
+    def _copy_repo_overwrite(self, src_dir: str, dst_dir: str):
+        """
+        将 src_dir 覆盖拷贝到 dst_dir（尽量温和：不删除 dst，只覆盖写入）
+        - 不覆盖 config.json
+        - 不拷贝 .git
+        - 不覆盖 log 目录
+        """
+        for root, dirs, files in os.walk(src_dir):
+            rel = os.path.relpath(root, src_dir)
+            if rel.startswith(".git"):
+                continue
+
+            # 跳过 log
+            if rel == "log" or rel.startswith("log" + os.sep):
+                continue
+
+            target_root = dst_dir if rel == "." else os.path.join(dst_dir, rel)
+            os.makedirs(target_root, exist_ok=True)
+
+            # 过滤 dirs（避免进入 .git / log）
+            dirs[:] = [d for d in dirs if d not in [".git", "log"]]
+
+            for fn in files:
+                if rel == "." and fn == "config.json":
+                    continue
+                if fn.endswith(".pyc"):
+                    continue
+                s = os.path.join(root, fn)
+                t = os.path.join(target_root, fn)
+                shutil.copy2(s, t)
+
+    def perform_self_upgrade(self) -> tuple[bool, str]:
+        """
+        执行升级：
+        - 若当前目录存在 .git：git fetch + git pull
+        - 否则：clone 到临时目录，然后覆盖拷贝到当前目录（不覆盖 config.json）
+        """
+        repo_dir = self.script_dir
+        git_dir = os.path.join(repo_dir, ".git")
+
+        # 确保 git 可用
+        try:
+            subprocess.run(["git", "--version"], check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+        except Exception as e:
+            return False, f"未检测到 git 或 git 不可用：{e}"
+
+        try:
+            if os.path.isdir(git_dir):
+                # 直接 pull
+                subprocess.run(["git", "-C", repo_dir, "fetch", "--tags", "--prune"], check=True)
+                subprocess.run(["git", "-C", repo_dir, "pull", "--rebase"], check=True)
+                return True, "git pull 成功"
+            else:
+                # clone + 覆盖
+                with tempfile.TemporaryDirectory(prefix="ncControl_upgrade_") as td:
+                    subprocess.run(["git", "clone", "--depth", "1", GITHUB_REPO_URL, td], check=True)
+                    self._copy_repo_overwrite(td, repo_dir)
+                return True, "clone 并覆盖更新成功"
+        except subprocess.CalledProcessError as e:
+            return False, f"git 命令执行失败：{e}"
+        except Exception as e:
+            return False, f"升级异常：{e}"
+
+    def handle_tg_upgrade_command(self, chat_id):
+        """
+        一键升级：放到线程里，避免阻塞轮询
+        """
+        def _worker():
+            self.send_telegram_message(chat_id, "⏫ 正在检查 GitHub 最新版本并执行升级，请稍候…")
+            latest, err = self.get_github_latest_version()
+            if err or not latest:
+                self.send_telegram_message(chat_id, f"❌ 获取 GitHub 最新版本失败：`{err or 'unknown error'}`")
+                return
+
+            cur = self._normalize_ver(self.app_version)
+            try:
+                if self._ver_tuple(latest) <= self._ver_tuple(cur):
+                    self.send_telegram_message(chat_id, f"🟢 当前已是最新版本：`{cur}`")
+                    return
+            except Exception:
+                # 比较失败也允许尝试升级
+                pass
+
+            ok, detail = self.perform_self_upgrade()
+            if not ok:
+                self.send_telegram_message(chat_id, f"❌ 升级失败：`{detail}`")
+                return
+
+            self.send_telegram_message(chat_id, f"✅ 升级完成：`{detail}`\n♻️ 正在重启服务…")
+            # 让 Docker restart policy 拉起新进程
+            os._exit(0)
+
+        threading.Thread(target=_worker, daemon=True).start()
+
+    # ================== 以上为新增 ==================
 
     def handle_tg_status_command(self, chat_id):
         """处理“获取所有nc机器状态”命令，快速返回当前缓存状态"""
@@ -277,12 +475,19 @@ class NetcupTrafficThrottleTester:
                         self.handle_tg_status_command(chat_id)
                     elif text in ("获取软件版本编号", "/version"):
                         self.handle_tg_version_command(chat_id)
+                    # === 新增 ===
+                    elif text in ("/latest", "查询GitHub最新版本", "查询github最新版本"):
+                        self.handle_tg_latest_command(chat_id)
+                    elif text in ("/upgrade", "一键升级", "升级到最新"):
+                        self.handle_tg_upgrade_command(chat_id)
                     else:
                         self.send_telegram_message(
                             chat_id,
                             "可用命令：\n"
-                            "- /status获取所有nc机器状态：获取所有nc机器状态\n"
-                            "- /version获取软件版本：获取软件版本",
+                            "- /status：获取所有nc机器状态\n"
+                            "- /version：获取软件版本\n"
+                            "- /latest：查询GitHub最新版本\n"
+                            "- /upgrade：一键升级到最新版本\n"
                         )
             except requests.exceptions.RequestException as e:
                 logger.error(f"请求异常: {e}")

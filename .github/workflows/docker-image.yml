@@ -50,4 +50,4 @@ jobs:
         push: true
         # 指定用户/仓库名
         tags: |
-          ${{ secrets.DOCKER_USERNAME }}/mynetcontrol:v1.0.6
+          ${{ secrets.DOCKER_USERNAME }}/mynetcontrol:v1.0.7
