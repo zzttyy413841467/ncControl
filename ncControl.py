@@ -387,7 +387,7 @@ class NetcupTrafficThrottleTester:
                 self.send_telegram_message(chat_id, f"❌ 升级失败：`{detail}`")
                 return
 
-            self.send_telegram_message(chat_id, f"✅ 升级完成：`{detail}`\n♻️ 正在重启服务…")
+            self.send_telegram_message(chat_id, f"✅ 升级完成：`{detail}`\n♻️ 重启服务成功…")
             os._exit(0)
 
         threading.Thread(target=_worker, daemon=True).start()
