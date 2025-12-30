@@ -9,7 +9,7 @@ RUN ln -snf /usr/share/zoneinfo/$TZ /etc/localtime && echo $TZ > /etc/timezone
 
 # 安装 git（用于 /upgrade），以及一些常见运行依赖
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends git ca-certificates \
+    && apt-get install -y --no-install-recommends git  vim ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 
 # 先拷贝依赖清单，利用缓存
