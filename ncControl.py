@@ -318,7 +318,7 @@ class NetcupTrafficThrottleTester:
                 t = os.path.join(target_root, fn)
                 shutil.copy2(s, t)
                 
-    def _run(cmd: list[str]) -> tuple[bool, str]:
+    def _run(self, cmd: list[str]) -> tuple[bool, str]:
         try:
             p = subprocess.run(
                 cmd,
@@ -326,6 +326,8 @@ class NetcupTrafficThrottleTester:
                 stdout=subprocess.PIPE,
                 stderr=subprocess.PIPE,
                 text=True,
+                encoding="utf-8",
+                errors="replace",
             )
             out = (p.stdout or "").strip()
             err = (p.stderr or "").strip()
@@ -333,6 +335,7 @@ class NetcupTrafficThrottleTester:
         except subprocess.CalledProcessError as e:
             out = (e.stdout or "").strip()
             err = (e.stderr or "").strip()
+            logger.info(f"_run fail: {err or out or e}")
             return False, (out + ("\n" + err if err else "")).strip() or str(e)
 
     def perform_self_upgrade(self) -> tuple[bool, str]:
@@ -385,7 +388,6 @@ class NetcupTrafficThrottleTester:
                 return
 
             self.send_telegram_message(chat_id, f"✅ 升级完成：`{detail}`\n♻️ 正在重启服务…")
-            # 让 Docker restart policy 拉起新进程
             os._exit(0)
 
         threading.Thread(target=_worker, daemon=True).start()
