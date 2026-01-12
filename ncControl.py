@@ -126,7 +126,7 @@ class NetcupTrafficThrottleTester:
         parts = re.split(r"[,\uFF0C;；|]+", raw)
         return [p.strip() for p in parts if p.strip()]
 
-			
+
     def mask_ip(self, ip: str) -> str:
         """ip脱敏操作"""
         parts = ip.split(".")
@@ -271,7 +271,7 @@ class NetcupTrafficThrottleTester:
 
         cur = self._normalize_ver(self.app_version)
         msg = [
-            "*版本信息*",
+            "*版本��息*",
             f"- 当前版本：`{cur}`",
             f"- GitHub 最新：`{latest}`",
         ]
@@ -724,14 +724,12 @@ class NetcupTrafficThrottleTester:
                 qb.stop_report_delete_all_except_categories(self.qb_except_categories_list)
             else:
                 qb.pause_all()
-                time.sleep(5)
-                qb.delete_all(delete_files=True)
         except Exception as e:
             logger.error(f"暂停 {ip} 所有任务失败：{e}")
             
         
     def update_cached_data(self):
-        """更新缓存的数据，并在状态变化时联动 Vertex 下载器 + 推送 Telegram"""
+        """更新缓存的数���，并在状态变化时联动 Vertex 下载器 + 推送 Telegram"""
         try:
             new_data = {}
 
@@ -786,7 +784,7 @@ class NetcupTrafficThrottleTester:
                     elif old_throttled != new_throttled:
                         logger.warning(f"[状态变化] {ip}: {old_throttled} -> {new_throttled}")
                         # ---- 业务逻辑：
-                        # 1) 若 True -> False（解除限速）：启用该下载器（允许进入“限速态”下的收割流程，具体按你的面板策略）
+                        # 1) 若 True -> False（解除限速）：启用该下载���（允许进入“限速态”下的收割流程，具体按你的面板策略）
                         # 2) 若 False -> True（被限速）：暂停该 IP 的所有 qB 任务，并暂停该下载器（避免瞬时冲高）
                         try:
                             if old_throttled is True and new_throttled is False:
