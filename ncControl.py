@@ -20,10 +20,10 @@ import subprocess
 import tempfile
 import shutil
 
-APP_VERSION = "v1.0.71"
+APP_VERSION = "v1.1"
 
 # === 新增：GitHub 仓库信息（按你要求固定到该 repo）===
-GITHUB_OWNER = "linlix0310"
+GITHUB_OWNER = "zzttyy413841467"
 GITHUB_REPO = "ncControl"
 GITHUB_REPO_URL = f"https://github.com/{GITHUB_OWNER}/{GITHUB_REPO}.git"
 GITHUB_API_BASE = "https://api.github.com"
@@ -773,6 +773,11 @@ class NetcupTrafficThrottleTester:
                             if new_throttled is False:
                                 logger.info(f"[首次-Vertex] 启用下载器({ip})")
                                 self.enable_downloader(ip)
+                                try:
+                                    qb = QBittorrentClient(url, username, password)
+                                    qb.resume_all()
+                                except Exception as e:
+                                    logger.error(f"启用下载器后恢复 {ip} 所有任务失败：{e}")
                             elif new_throttled is True:
                                 logger.info(f"[首次-Vertex] 暂停下载器({ip})")
                                 meta["current_start"] = now
@@ -790,6 +795,11 @@ class NetcupTrafficThrottleTester:
                             if old_throttled is True and new_throttled is False:
                                 logger.info(f"[Vertex] 启用下载器({ip})")
                                 self.enable_downloader(ip)
+                                try:
+                                    qb = QBittorrentClient(url, username, password)
+                                    qb.resume_all()
+                                except Exception as e:
+                                    logger.error(f"启用下载器后恢复 {ip} 所有任务失败：{e}")
                                 if meta.get("current_start") is not None:
                                     meta["last_start"] = meta["current_start"]
                                     meta["last_end"] = now
