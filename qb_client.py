@@ -45,11 +45,11 @@ class QBittorrentClient:
         wait_seconds: int = 5,
     ) -> int:
         """
-        除 exclude_categories 外：强制汇报 + 暂停 + 删除（可选删除文件）
-        :param exclude_categories: 要保留(不删除)的分类名，支持 str 或 list/set/tuple[str]
-        :param delete_files: True 时会连同本地数据一并删除（危险操作）默认 True
+        除 exclude_categories 外：仅对“正在下载”的任务强制汇报 + 暂停（不再删除）。
+        :param exclude_categories: 要保留(不处理)的分类名，支持 str 或 list/set/tuple[str]
+        :param delete_files: 已废弃参数，保留仅为兼容
         :param wait_seconds: 强制汇报后等待秒数（给 tracker 一点时间）
-        :return: 实际处理（删除）的任务数量
+        :return: 实际处理（暂停）的任务数量（仅下载中）
         """
         if isinstance(exclude_categories, str):
             exclude_set = {exclude_categories}
@@ -62,14 +62,27 @@ class QBittorrentClient:
         else:
             torrents = self.client.torrents.info()
 
-        # 过滤：category 在 exclude_set 的不动，其它全处理
+        # 过滤：category 在 exclude_set 的不动，其它全处理；
+        # 仅挑选“下载中/等待下载相关”状态
+        download_like_states = {
+            "downloading",     # 正在下载
+            "stalledDL",       # 下载停滞
+            "queuedDL",        # 等待下载队列
+            "metaDL",          # 元数据下载中
+            "checkingDL",      # 下载前校验中
+            "allocating",      # 为下载分配空间
+        }
         hashes = []
         for t in torrents:
             h = getattr(t, "hash", None)
             cat = getattr(t, "category", None)
+            state = getattr(t, "state", None)
+            state_str = state if isinstance(state, str) else (str(state) if state is not None else None)
             if not h:
                 continue
             if cat in exclude_set:
+                continue
+            if state_str not in download_like_states:
                 continue
             hashes.append(h)
 
@@ -82,7 +95,9 @@ class QBittorrentClient:
         # 1) 强制汇报
         try:
             self.client.torrents_reannounce(torrent_hashes=hash_str)
-            logger.info(f"已对 {len(hashes)} 个任务发出强制汇报指令（排除分类: {sorted(exclude_set)}）。")
+            logger.info(
+                f"已对 {len(hashes)} 个下载/等待下载任务发出强制汇报指令（排除分类: {sorted(exclude_set)}）。"
+            )
         except Exception as e:
             logger.warning(f"强制汇报失败（仍继续后续操作）：{e}")
 
@@ -93,26 +108,51 @@ class QBittorrentClient:
         # 2) 暂停（stop）
         try:
             self.client.torrents_stop(torrent_hashes=hash_str)
-            logger.info(f"已对 {len(hashes)} 个任务发出暂停指令（排除分类: {sorted(exclude_set)}）。")
+            logger.info(
+                f"已对 {len(hashes)} 个下载/等待下载任务发出暂停指令（排除分类: {sorted(exclude_set)}），未执行删除。"
+            )
         except Exception as e:
             logger.warning(f"暂停失败（仍继续后续操作）：{e}")
-
-        # 3) 删除（种子 + 文件）
-        self.client.torrents.delete(hashes=hash_str, delete_files=delete_files)
-        logger.info(
-            f"已发出删除指令：删除 {len(hashes)} 个任务（排除分类: {sorted(exclude_set)}），delete_files={delete_files}"
-        )
         return len(hashes)
 
 
     def pause_all(self):
         """
-        暂停所有种子任务，并检查是否全部暂停成功。
+        仅暂停处于下载/等待下载状态的种子任务。
         """
-        self.client.torrents_reannounce(torrent_hashes="all")
-        self.client.torrents_stop(torrent_hashes="all")
-        
-        logger.info("已发出强制汇报&暂停所有种子任务的指令。")
+        # 兼容不同版本的调用方式
+        if hasattr(self.client, "torrents_info"):
+            torrents = self.client.torrents_info()
+        else:
+            torrents = self.client.torrents.info()
+
+        download_like_states = {
+            "downloading",
+            "stalledDL",
+            "queuedDL",
+            "metaDL",
+            "checkingDL",
+            "allocating",
+        }
+        hashes = []
+        for t in torrents:
+            h = getattr(t, "hash", None)
+            state = getattr(t, "state", None)
+            state_str = state if isinstance(state, str) else (str(state) if state is not None else None)
+            if not h:
+                continue
+            if state_str in download_like_states:
+                hashes.append(h)
+
+        if not hashes:
+            logger.info("没有处于下载/等待下载状态的任务需要暂停。")
+            return
+
+        hash_str = "|".join(hashes)
+        self.client.torrents_reannounce(torrent_hashes=hash_str)
+        self.client.torrents_stop(torrent_hashes=hash_str)
+
+        logger.info(f"已发出强制汇报&暂停 {len(hashes)} 个下载/等待下载任务。")
             
     def delete_all(self, *, delete_files: bool = False) -> None:
         """
