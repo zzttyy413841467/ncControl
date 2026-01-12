@@ -162,6 +162,35 @@ class QBittorrentClient:
         self.client.torrents.delete(hashes="all", delete_files=delete_files)
         logger.info("已发出删除全部任务的指令。")
 
+    def resume_all(self):
+        """
+        启动（恢复）所有“处于暂停状态”的种子任务，不进行强制汇报。
+        """
+        # 获取当前任务列表
+        if hasattr(self.client, "torrents_info"):
+            torrents = self.client.torrents_info()
+        else:
+            torrents = self.client.torrents.info()
+
+        paused_states = {"pausedDL"}
+        hashes = []
+        for t in torrents:
+            h = getattr(t, "hash", None)
+            state = getattr(t, "state", None)
+            state_str = state if isinstance(state, str) else (str(state) if state is not None else None)
+            if not h:
+                continue
+            if state_str in paused_states:
+                hashes.append(h)
+
+        if not hashes:
+            logger.info("没有处于暂停状态的任务需要恢复。")
+            return
+
+        hash_str = "|".join(hashes)
+        self.client.torrents_resume(torrent_hashes=hash_str)
+        logger.info(f"已发出恢复 {len(hashes)} 个处于暂停状态的任务的指令。")
+
 ## 测试代码
 #if __name__ == "__main__":
 #    # 初始化客户端
