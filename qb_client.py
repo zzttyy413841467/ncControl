@@ -172,7 +172,14 @@ class QBittorrentClient:
         else:
             torrents = self.client.torrents.info()
 
-        paused_states = {"pausedDL"}
+        paused_states = {
+                "pausedDL",
+                "pausedUP",
+                "paused",
+                "stopped",
+                "stoppedDL",
+                "stoppedUP",
+            }
         hashes = []
         for t in torrents:
             h = getattr(t, "hash", None)
@@ -199,3 +206,4 @@ class QBittorrentClient:
 #    qb_client.is_alive()
 #    
 #    qb_client.exit_block_new()
+
